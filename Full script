@@ -1,0 +1,647 @@
+/* Updated:
+	ER-diagrams
+	Stored procedure decrypt_staff has been corrected
+    Multiple products can now be added to single order with same order_ID & customer_ID
+    2 report-views have now been updated to function alongside new order system (SP extend_existing_order)
+*/
+
+
+-- Presentation shortcuts: 
+-- **************************************
+-- (2 VIEWS (Stored in Stored Procedures) examples below):
+-- CALL get_all_orders;
+-- CALL get_single_order (1);
+-- **************************************
+
+
+-- **************************************
+-- Order_details: SELECT * FROM order_details;
+-- SUPPLIERS:     SELECT supplier_ID, supplier_name, email_address, phone_nr, country, city, postal_code, address FROM suppliers;
+-- PRODUCTS:      SELECT * FROM products;    &    SELECT * FROM products WHERE product_ID = 10;
+-- STAFF          SELECT staff_ID, name, salary, email_address FROM staff;
+-- CUSTOMERS:     SELECT customer_ID, customer_name, customer_password, credit_card_info, email FROM customers;
+-- TRANSACTIONS:  SELECT * FROM transaction_history;
+-- **************************************
+
+
+-- **************************************
+-- (Simple stored function example below)
+-- SELECT furniturestore.multiply(5, 6); 
+-- **************************************
+
+
+DROP DATABASE IF EXISTS FurnitureStore; 
+CREATE DATABASE FurnitureStore; 
+USE FurnitureStore;
+    
+CREATE TABLE suppliers (
+supplier_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+supplier_name VARCHAR(50),
+email_address VARCHAR(100),
+salt1 VARCHAR(100),
+phone_nr VARCHAR (100),
+salt2 VARCHAR (100),
+country VARCHAR (50),
+city VARCHAR (50),
+postal_code VARCHAR(100),
+salt3 VARCHAR(100),
+address VARCHAR (100),
+salt4 VARCHAR (100),
+PRIMARY KEY (supplier_ID)
+)DEFAULT CHARSET 'latin1';
+
+CREATE TABLE products (
+product_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+product_name VARCHAR(255),
+stock INT UNSIGNED NOT NULL,
+price_SEK DOUBLE not null,
+PRIMARY KEY (product_ID)
+);
+
+CREATE TABLE staff (
+staff_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+name VARCHAR(50),
+salary VARCHAR (100),
+salt1 VARCHAR (50),
+email_address VARCHAR(100),
+salt2 VARCHAR (50),
+PRIMARY KEY (staff_ID)
+)DEFAULT CHARSET 'latin1';
+
+CREATE TABLE customers (
+customer_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+customer_name VARCHAR(100),
+customer_password VARCHAR (100),
+credit_card_info VARCHAR(100),
+salt1 VARCHAR(50),
+email VARCHAR(100),
+salt2 VARCHAR(50),
+PRIMARY KEY (customer_ID)
+)DEFAULT CHARSET 'latin1';
+
+CREATE TABLE orders (
+order_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+customer_ID INT UNSIGNED NOT NULL, 	-- ska hämtas från table: customers
+PRIMARY KEY (order_ID),
+FOREIGN KEY (customer_ID) REFERENCES customers (customer_ID)
+);
+
+CREATE TABLE order_details (
+order_details_ID INT UNSIGNED NOT NULL AUTO_INCREMENT,
+order_ID INT UNSIGNED NOT NULL,
+customer_ID INT UNSIGNED NOT NULL, 	-- ska hämtas från table: customers
+product_ID INT UNSIGNED NOT NULL,
+quantity_purchased INT not null,
+order_date DATETIME NOT NULL,
+PRIMARY KEY (order_details_ID)
+-- FOREIGN KEY (customer_ID) REFERENCES customers (customer_ID),
+-- FOREIGN KEY (product_ID) REFERENCES products (product_ID)
+);
+
+CREATE TABLE transaction_history (
+order_ID INT UNSIGNED DEFAULT 1337, 
+shipment_date DATE,
+expected_delivery DATE,
+PRIMARY KEY (order_ID)
+);
+
+
+
+
+
+-- ************************* SP for VIEW for single order ***********************
+-- Shows all possible wanted information from one specific order (order_ID inputted)
+DELIMITER $$
+CREATE PROCEDURE `get_single_order` (single_order INT)
+BEGIN
+	DROP VIEW IF EXISTS order_total_price;
+	CREATE VIEW order_total_price AS
+	SELECT order_ID, customers.customer_ID, customers.customer_name, products.product_ID, product_name, 
+	price_SEK, quantity_purchased, price_SEK * quantity_purchased AS total_price
+	FROM customers, order_details, products
+	WHERE customers.customer_ID = order_details.customer_ID AND order_details.product_ID = products.product_ID;
+	SELECT * FROM order_total_price
+    WHERE order_ID = single_order;
+END$$
+
+DELIMITER ;
+
+ /* Example:
+ CALL get_single_order (2);  Syntax */
+-- ****************************************************************************************
+
+
+
+
+
+-- ********************************* SP get all orders VIEW *******************************
+-- Shows all possible wanted information from all orders that exist
+USE `furniturestore`;
+DROP PROCEDURE IF EXISTS `get_all_orders`;
+
+DELIMITER $$
+USE `furniturestore`$$
+CREATE PROCEDURE `get_all_orders` ()           
+BEGIN
+	DROP VIEW IF EXISTS order_total_price;
+	CREATE VIEW order_total_price AS
+	SELECT order_ID, customers.customer_ID, customers.customer_name, products.product_ID, product_name, 
+	price_SEK, quantity_purchased, price_SEK * quantity_purchased AS total_price, order_details.order_date
+	FROM customers, order_details, products
+	WHERE customers.customer_ID = order_details.customer_ID AND order_details.product_ID = products.product_ID;
+	SELECT * FROM order_total_price;
+END$$
+
+DELIMITER ;
+
+-- Example:
+-- CALL get_all_orders;
+-- ********************************************************************************************
+
+
+
+
+
+-- ************************************ SP - ADD SUPPLIER *************************************
+-- Adds an additional supplier to database
+DELIMITER $$
+CREATE PROCEDURE `add_supplier` (supplier_name VARCHAR(50), email_address VARCHAR (100), phone_nr VARCHAR(50),
+country VARCHAR(50), city VARCHAR(50), postal_code VARCHAR(50), address VARCHAR(50))
+
+BEGIN
+
+SET @random_salt1 = md5(rand());
+SET @random_salt2 = md5(rand());
+SET @random_salt3 = md5(rand());
+SET @random_salt4 = md5(rand());
+
+SET @key1 = concat(supplier_name, ' key1');
+SET @key2 = concat(supplier_name, ' key2');
+SET @key3 = concat(supplier_name, ' key3');
+SET @key4 = concat(supplier_name, ' key4');
+ 
+INSERT INTO suppliers (supplier_name, email_address, salt1, phone_nr, salt2, country, city, postal_code, salt3, address, salt4)
+VALUES (supplier_name, 
+aes_encrypt(concat(email_address, @random_salt1), @key1), @random_salt1,
+aes_encrypt(concat(phone_nr, @random_salt2), @key2), @random_salt2,
+country, city,
+aes_encrypt(concat(postal_code, @random_salt3), @key3), @random_salt3,
+aes_encrypt(concat(address, @random_salt4), @key4), @random_salt4);
+
+END$$
+
+DELIMITER ;
+ 
+-- Adding all suppliers for database default
+CALL add_supplier ('Bertils stol och bord AB', 'bertilbord@stockholm.se', '072-4412331', 'Sweden', 'Stockholm', '111 30', 'Drottninggatan 3');
+CALL add_supplier ('Norrlands mubeleum INC', 'norrbordeninc@gmail.com', '072-5212358', 'Sweden', 'Piteå', '255 46', 'Vurstivägen 31');
+CALL add_supplier ('Incels4life', 'yokohamarobotic@gmail.com', '070-4111674', 'Japan', 'Kyoto', '520-0462', 'Sannenzaka');
+CALL add_supplier ('Michael Bay Explosive furniture', 'illegalC4@government.com', '042-5551234', 'USA', 'Austin', '73 301', 'Sixth Street 2');
+CALL add_supplier ('Ich habe einen Stuhl INC', 'einzweidreifier@berlinistmeincity.com', '30 901820', 'Germany', 'Berlin', '10115', 'Bierstraße 6');
+CALL add_supplier ('Financial shituation', 'hurgörmanenemail@hotmail.microsoft.com', '072-1112656', 'Sweden', 'Lund', '89215', 'Polkagatan 42');
+
+-- Email key = supplier_name ' key1'
+-- Phone key = supplier_name ' key2'
+-- Postal key = supplier_name ' key3'
+-- Address key = supplier_name ' key4'
+-- ********************************************************************************************
+
+
+
+
+
+-- ************************************* DECRYPT SUPPLIER ******************************************************************
+-- Decrypts hidden information from SUPPLIERS
+DELIMITER $$
+CREATE PROCEDURE `decrypt_supplier` (email_salt VARCHAR (50), email_key VARCHAR(50), phone_salt VARCHAR(50), phone_key VARCHAR(50),
+ postal_salt VARCHAR(50), postal_key VARCHAR(50), address_salt VARCHAR(50), address_key VARCHAR(50))
+
+BEGIN
+
+ SELECT supplier_ID, supplier_name, email_address, phone_nr, country, city, postal_code, address FROM suppliers;
+    
+	SELECT supplier_ID, supplier_name,
+	REPLACE(cast(aes_decrypt(email_address, email_key)AS CHAR(100)), email_salt, '') AS email_address, 
+	REPLACE(cast(aes_decrypt(phone_nr, phone_key)AS CHAR(100)), phone_salt, '') AS phone_nr, 
+	country, city,
+    REPLACE(cast(aes_decrypt(postal_code, postal_key)AS CHAR(100)), postal_salt, '') AS postal_code, 
+    REPLACE(cast(aes_decrypt(address, address_key)AS CHAR(100)), address_salt, '') AS address
+    
+    FROM suppliers ORDER BY supplier_ID; 
+    
+
+END$$
+
+DELIMITER ;
+/* EXAMPLE: 
+      
+>ALERT< Remember to use current randomized salt!
+
+CALL decrypt_supplier('acefc8f7a2359b3fc15a39b5aa08d5ef', 'Bertils stol och bord AB key1', '6a8403836dc4a5a1c31171aaf42c6b13', 'Bertils stol och bord AB key2', 
+'75cdb76fce5cac51c18055fb23f5fd6d', 'Bertils stol och bord AB key3', '2997cd3617375613a2ddd0d5488cf848', 'Bertils stol och bord AB key4'); 
+
+SELECT * FROM suppliers; */
+-- ****************************************************************************************************************************
+
+
+
+
+
+-- ************************************* SP - ADD PRODUCT *************************************
+-- Add an additional product to database
+DELIMITER $$
+CREATE PROCEDURE `add_product` (product VARCHAR(255), In_stock INT, price DOUBLE)
+
+BEGIN
+INSERT INTO products (product_name, stock, price_SEK)
+VALUES (product, In_stock, price);
+
+END$$
+DELIMITER ;
+
+-- Adding all products for database default
+CALL add_product ('wooden table', 12, 1799);
+CALL add_product ('wooden chair', 48, 699);
+CALL add_product ('king size hastens bed', 4, 9999);
+CALL add_product ('luxury leather sofa', 8, 7999);
+CALL add_product ('extremely squeaky recliner', 17, 899);
+CALL add_product ('antique hand made unique one of a kind cupholder', 10, 79999);
+CALL add_product ('all-in-one gaming station / toilet bucket / large mini-fridge / jolt cola holder', 5, 19799);
+CALL add_product ('ancient antique molded bathtub chair for aunt Gun-Britt', 3, 2789);
+CALL add_product ('luxury gaming ass-warmer with built-in jolt-cola direct-injector into veins', 9, 599);
+CALL add_product ('bathroom towel holder', 7, 99);
+CALL add_product ('grandmas favorite rocking chair', 1, 1099);
+-- ********************************************************************************************
+
+
+
+
+
+-- **************************************** SP - ADD STAFF ******************************************
+-- Add additional staff to database
+DELIMITER $$
+CREATE PROCEDURE `add_staff` (staff_name VARCHAR(50), salary VARCHAR (10), email_address VARCHAR (100))
+
+BEGIN
+
+SET @random_salt1 = md5(rand());
+SET @random_salt2 = md5(rand());
+SET @key1 = concat(staff_name, ' key1');
+SET @key2 = concat(staff_name, ' key2');
+ 
+INSERT INTO staff (name, salary, salt1, email_address, salt2)
+VALUES (staff_name, aes_encrypt(concat(salary, @random_salt1), @key1), @random_salt1,
+aes_encrypt(concat(email_address, @random_salt2), @key2), @random_salt2);
+
+END$$
+
+DELIMITER ;
+
+-- Adding all staff for database default
+CALL add_staff('Toros Cuthulu', 34000, 'turkishmetal@hotmail.com'); 
+CALL add_staff('Kenth Agent', 32000, 'mr.agent.stockholm@hotmail.com'); 
+CALL add_staff('Olof Palmé', 400000, 'walkingdead@gmail.com'); 
+CALL add_staff('Switch Bitch', 0, 'iamiliterate@helpme.email.com'); 
+CALL add_staff('Bjorn Pettersson', 31000, 'grizzly@gmail.com'); 
+CALL add_staff('Alkis Supesson', 50000, 'carlsberg.dricka@yahoomail.com'); 
+CALL add_staff('Newton Kaffe Maskin', 500, 'tre.droppar@gmail.com'); 
+CALL add_staff('Luke Skywalker', 46000, 'glowstick@hotmail.com'); 
+CALL add_staff('Leif GW Persson', 72000, 'efterlystgubbfan@sherlock.se'); 
+CALL add_staff('Karl XVI Gustav', 550000, 'bigswedenman@icantread.se'); 
+
+-- salary key = staff_name +' key1'
+-- Email key = staff_name +' key2'
+-- **************************************************************************************************
+
+
+
+
+
+-- *************************************** SP - DECRYPT STAFF ***************************************
+-- Decrypts hidden information from STAFF
+DELIMITER $$
+CREATE PROCEDURE `decrypt_staff` (salary_salt VARCHAR (50), salary_key VARCHAR(50), email_salt VARCHAR(50), email_key VARCHAR(50))
+
+BEGIN
+
+ -- SELECT staff_ID, name, salary, email_address FROM staff;
+    
+	SELECT staff_ID, name,
+	REPLACE(cast(aes_decrypt(salary, salary_key) AS CHAR(100)), salary_salt, '') AS salary, 
+	REPLACE(cast(aes_decrypt(email_address, email_key) AS CHAR(100)), email_salt, '')AS email_address
+	FROM staff ORDER BY salary; 
+    
+
+END$$
+
+DELIMITER ;
+
+/* EXAMPLE: 
+      
+>ALERT< Remember to use current randomized salt!
+
+CALL decrypt_staff ('a24607c4f197cefb75d8f71d6344b70d', 'Toros Cuthulu key1', 'ac338cf4d53861b4860b8572342d41ad', 'Toros Cuthulu key2');
+
+select * from staff; */ 
+-- **************************************************************************************************
+
+
+
+
+
+
+-- ************************************** SP - ADD CUSTOMER *****************************************
+-- User creation system (information gets entered into database upon "account creation")
+DELIMITER $$
+CREATE PROCEDURE `add_customer` (customer_name VARCHAR(100), customer_password VARCHAR (100),credit_card_info VARCHAR (100), email_address VARCHAR (100))
+
+BEGIN
+
+SET @random_salt1 = md5(rand());
+SET @random_salt2 = md5(rand());
+SET @random_salt3 = md5(rand());
+SET @key1 = concat(customer_name, ' key1');
+SET @key2 = concat(customer_name, ' key2');
+ 
+INSERT INTO customers (customer_name, customer_password, /*salt1,*/ credit_card_info, salt1, email, salt2)
+VALUES (customer_name, sha2(concat(customer_password, @random_salt3), '0'), /*@random_salt1,*/ 
+aes_encrypt(concat(credit_card_info, @random_salt1), @key1), @random_salt1,
+aes_encrypt(concat(email_address, @random_salt2), @key2), @random_salt2);
+
+END$$
+
+DELIMITER ;
+
+-- Adding all customers for database default
+CALL add_customer ('Anthony Smith', 'password', '3237664510405030', 'anthony.smith123@hotmail.com');
+CALL add_customer ('Joakim Andersson', 'supersecretPassword', '2769609558638839', 'andersson.minecraftwarrior99@hotmail.com');
+CALL add_customer ('Timmy "The beard" Nilsson', 'minsvartakatt', '4434556353484730', 'timmy98@tinder.com');
+CALL add_customer ('James Bond', '007', '7543726730436862', 'noinfo@MI6.com');
+CALL add_customer ('Sqaure Bob Cirkle-pants', 'blubb', '6405754338761696', 'circkle.pants@water.com');
+CALL add_customer ('Michael Jacksson', 'thriller123', '6972753981187501', 'moonwalk@neverland.com');
+CALL add_customer ('Pickachu Pokésson', 'bigredball', '0724439561998280', 'pikapikapika@hotmail.com');
+CALL add_customer ('Bill "bygg om hela din kod" Palmestedt', 'nopasswordsoclever', '3119664080138891', 'secrethacker@pentagon.com');
+CALL add_customer ('Freddie Mercury', 'skyline', '9830331734920422', 'ilikemanybeers@gmail.com');
+CALL add_customer ('Toros Cthulhu', 'hunken69', '9350687171157657', 'singleandreadytomingle@tinder.lovefine.com');
+CALL add_customer ('Julius "caesar" Thomsen', 'iwroteallpasswordshihi', '4388197481953041', 'twobeersarebetterthanonebeer@alcoholicsanonomous.helpme.se');
+
+-- credit card key = customer_name +' key1'
+-- Email key = customer_name +' key2'
+-- **************************************************************************************************
+
+
+
+
+
+
+-- **************************************** Decrypt customer*****************************************
+-- Decrypts hidden information from CUSTOMERS
+DELIMITER $$
+CREATE PROCEDURE `decrypt_customer` (credit_card_salt VARCHAR (50), credit_card_key VARCHAR(50), email_salt VARCHAR(50), email_key VARCHAR(50))
+
+BEGIN
+
+ SELECT customer_ID, customer_name, customer_password, credit_card_info, email FROM customers;
+    
+	SELECT customer_ID, customer_name,
+	REPLACE(cast(aes_decrypt(credit_card_info, credit_card_key) AS CHAR(100)), credit_card_salt, '') AS credit_card_info, 
+	REPLACE(cast(aes_decrypt(email, email_key) AS CHAR(100)), email_salt, '') AS email_address
+	FROM customers ORDER BY customer_ID; 
+
+END$$
+
+DELIMITER ;
+
+/* EXAMPLE: 
+      
+>ALERT< Remember to use current randomized salt!
+
+CALL decrypt_customer ('dee7eeb8fe8bddf228cea8c75150a0ce', 'Anthony Smith key1', '71a935788207a4119db43e15f45b772c', 'Anthony Smith key2');
+
+SELECT * FROM customers; */ 
+-- **************************************************************************************************
+
+
+
+
+
+
+-- ************************************* SP - place_order *******************************************
+-- The intended system for customers to place orders and have all information be fed into our system properly
+DELIMITER $$
+USE `furniturestore`$$
+CREATE DEFINER=`root`@`localhost` 
+PROCEDURE `place_order`(product INT, quantity INT, current_customer INT)
+    
+BEGIN
+		DECLARE `_rollback` BOOL DEFAULT 0;
+		DECLARE CONTINUE HANDLER FOR SQLEXCEPTION SET `_rollback` = 1;
+        
+START TRANSACTION;  -- If rollback occures we jump back up here!
+
+	UPDATE products
+	SET stock = stock - quantity
+    WHERE product_ID = product;
+    
+    INSERT INTO orders(customer_ID)
+    VALUES(current_customer);
+        
+	 SELECT @newOrderId := MAX(order_id) FROM orders;
+     
+	INSERT INTO order_details(order_ID, customer_ID, product_ID, quantity_purchased, order_date)
+    VALUES(@newOrderId, current_customer, product, quantity, NOW());
+     
+	INSERT INTO transaction_history (order_ID, shipment_date, expected_delivery)
+	VALUES (@newOrderId, DATE_ADD(NOW(), INTERVAL 1 DAY), DATE_ADD(NOW(), INTERVAL 7 DAY));
+     
+	 SELECT @stockForProduct := (stock) FROM products where product_ID = product;
+
+     SET @error_text = 'A rollback has occured! Make sure not to attempt a greater order than current avalible stock can cover. Should error persist, please contact customer support at leaveusalone.wedonotcare@yahoo.com';
+     
+	IF `_rollback` OR @stockForProduct < quantity THEN 
+    SELECT @error_text as 'Error message';  
+    ROLLBACK;
+    
+    ELSE
+    COMMIT;
+    
+    END IF;
+    
+END$$
+
+DELIMITER ;
+
+
+--  Adding database default orders
+ CALL place_order (1, 2, 10);
+ CALL place_order (10, 2, 11);
+ CALL place_order (5, 2, 4);
+ CALL place_order (8, 1, 3);
+ CALL place_order (4, 4, 7);
+ CALL place_order (2, 8, 8);
+ -- *************************************************************************************************
+ 
+ 
+ 
+ 
+ 
+ -- ************************************* SP - Extend_existing_order *********************************
+-- The intended system for customers to extend previous order with more products and have all information be fed into our system properly
+-- To be used only when same customer wants to order multiple products under the same order_ID.
+DROP PROCEDURE IF EXISTS extend_existing_order;
+DELIMITER $$
+USE `furniturestore`$$
+CREATE DEFINER=`root`@`localhost` 
+PROCEDURE `extend_existing_order`(Your_order_ID INT, product INT, quantity INT, current_customer INT)
+    
+BEGIN
+        
+START TRANSACTION;  
+
+	UPDATE products
+	SET stock = stock - quantity
+    WHERE product_ID = product;
+     
+	INSERT INTO order_details(order_ID, customer_ID, product_ID, quantity_purchased, order_date)
+    VALUES(Your_order_ID, current_customer, product, quantity, NOW());
+     
+	UPDATE transaction_history
+	SET shipment_date = DATE_ADD(NOW(), INTERVAL 1 DAY), expected_delivery = DATE_ADD(NOW(), INTERVAL 7 DAY)
+    WHERE order_ID = Your_order_ID;
+    
+     SELECT @stockForProduct := (stock) FROM products where product_ID = product;
+     
+	SET @error_text = 'A rollback has occured! Make sure not to attempt a greater order than current avalible stock can cover. Should error persist, please contact customer support at leaveusalone.wedonotcare@yahoo.com';
+
+    COMMIT;
+    
+END$$
+
+DELIMITER ;
+
+-- example below:
+CALL extend_existing_order (1, 10, 2, 10); 
+-- SELECT * FROM orders;
+-- CALL get_all_orders;
+-- CALL get_single_order (1);
+-- Order_details: SELECT * FROM order_details;
+-- PRODUCTS:      SELECT * FROM products;  
+-- TRANSACTIONS:  SELECT * FROM transaction_history;
+-- ****************************************************************************************************
+ 
+ 
+ 
+ 
+ 
+ -- *********************************** SP - delete_customer ****************************************
+ -- This precedure deletes a single customer from all tables where he/she could be referenced 1.customers 2. orders 3.transaction_history
+DELIMITER $$
+CREATE PROCEDURE `delete_customer` (user_to_remove INTEGER)
+BEGIN
+SELECT @order_ID := order_ID FROM orders WHERE customer_ID = user_to_remove;
+
+	 -- SELECT @newOrderId := MAX(order_id) FROM orders;
+     
+DELETE from transaction_history WHERE order_ID = @order_ID;
+DELETE FROM orders WHERE customer_ID = user_to_remove;
+DELETE FROM customers WHERE customer_ID = user_to_remove;
+END$$
+
+DELIMITER ;
+/* EXAMPLE: 
+
+CALL delete_customer(10);
+
+SELECT * FROM customers; 
+SELECT * FROM transaction_history; 
+CALL get_all_orders; */
+-- **************************************************************************************************
+ 
+ 
+ 
+ 
+ 
+-- *************************************** SP - Raise all prices ************************************
+DELIMITER $$
+CREATE PROCEDURE `raise_all_prices` (percentage DOUBLE)
+
+BEGIN
+SET @statement = concat('All product prices increased by ', percentage, '%');
+SET percentage = percentage / 100 + 1;
+SET @counter = 1;
+SELECT @all_products := COUNT(product_ID)
+FROM products;
+
+
+WHILE (@counter <= @all_products) DO
+
+UPDATE products
+SET price_SEK = price_SEK * percentage
+WHERE product_ID = @counter;
+SET @counter = @counter + 1;
+
+END WHILE;
+
+SELECT @statement;
+
+END$$
+
+DELIMITER ;
+-- Select your wanted percentage (%) for change
+-- SELECT * FROM products;
+-- *****************************************************************************************************
+
+
+
+
+
+-- *************************************** SP - Lower all prices ***************************************
+DELIMITER $$
+CREATE PROCEDURE `lower_all_prices` (percentage DOUBLE)
+
+BEGIN
+SET @statement = concat('All product prices decreased by ', percentage, '%');
+SET percentage = 1 - (percentage / 100);
+SET @counter = 1;
+SELECT @all_products := COUNT(product_ID)
+FROM products;
+
+
+WHILE (@counter <= @all_products) DO
+
+UPDATE products
+SET price_SEK = price_SEK * percentage
+WHERE product_ID = @counter;
+SET @counter = @counter + 1;
+
+END WHILE;
+
+SELECT @statement;
+
+END$$
+
+DELIMITER ;
+-- Select your wanted percentage (%) for change
+-- *****************************************************************************************************
+
+
+
+ 
+  
+-- *********************************** SF - multiply ***************************************************
+-- Function returns a basic multiplication, useful for field calculations
+DELIMITER $$
+CREATE FUNCTION `multiply` (x DOUBLE, y DOUBLE)
+RETURNS DOUBLE
+DETERMINISTIC
+BEGIN
+	DECLARE result DOUBLE;
+    SET result = x * y;
+RETURN result;
+END$$
+
+DELIMITER ;
+
+-- To use function, please see example below: 
+-- SELECT furniturestore.multiply(5, 6);
+-- *****************************************************************************************************
